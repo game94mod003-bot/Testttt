@@ -12,8 +12,15 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
-      - name: Accept Android licenses
-        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+      - name: Install Android SDK packages
+        run: |
+          SDK="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          echo "SDK=$SDK"
+          SM=$(find "$SDK" -name sdkmanager -type f 2>/dev/null | head -1)
+          echo "sdkmanager=$SM"
+          yes | "$SM" --licenses > /dev/null 2>&1 || true
+          "$SM" "platforms;android-34" "build-tools;34.0.0" "platform-tools" > /dev/null || true
+          echo "sdk.dir=$SDK" > local.properties
       - name: Install Gradle 8.7
         run: |
           wget -q https://services.gradle.org/distributions/gradle-8.7-bin.zip -O /tmp/gradle.zip
@@ -23,9 +30,16 @@ jobs:
         run: |
           S=$(find . -name settings.gradle -not -path './.git/*' | head -1)
           if [ -z "$S" ]; then echo "settings.gradle not found - upload the project files"; exit 1; fi
-          cd "$(dirname "$S")"
-          gradle --version
-          gradle assembleDebug --no-daemon --stacktrace
+          D=$(dirname "$S")
+          cp local.properties "$D/local.properties" 2>/dev/null || true
+          cd "$D"
+          set -o pipefail
+          gradle assembleDebug --no-daemon --console=plain 2>&1 | tee "$GITHUB_WORKSPACE/build.log"
+      - name: ERROR SUMMARY (send me this)
+        if: failure()
+        run: |
+          echo "========== ERROR SUMMARY =========="
+          grep -n -B2 -A14 -E "What went wrong|error:|\.java:[0-9]+|AAPT|FAILURE" build.log | head -80
       - uses: actions/upload-artifact@v4
         with:
           name: Abulix-APK
